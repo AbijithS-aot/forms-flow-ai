@@ -49,10 +49,6 @@ class EmbedCommonMethods:
             form_status = FormProcessMapperService.get_mapper_by_formid(form["_id"])
             if form_status["status"] == str(FormProcessMapperStatus.ACTIVE.value):
                 return formio_service.get_form_by_path(path, formio_token)
-            return (
-                {"message": "Form not published"},
-                HTTPStatus.BAD_REQUEST,
-            )
         except BusinessException as err:
             return err.error, err.status_code
 
