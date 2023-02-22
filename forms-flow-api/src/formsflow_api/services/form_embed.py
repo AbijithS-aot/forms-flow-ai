@@ -24,7 +24,7 @@ class CombineFormAndApplicationCreate:  # pylint: disable=too-few-public-methods
                 __class__.__populate_default_keys(  # pylint: disable=protected-access
                     data
                 )
-            )  # pylint: disable=protected-access
+            )
             application_data = application_schema.load(data)
             formio_service = FormioService()
             form_io_token = formio_service.get_formio_access_token()
