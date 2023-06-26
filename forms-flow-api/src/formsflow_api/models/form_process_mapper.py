@@ -17,7 +17,6 @@ from formsflow_api_utils.utils.user_context import UserContext, user_context
 from sqlalchemy import UniqueConstraint, and_, desc, func
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.sql.expression import text
-
 from .audit_mixin import AuditDateTimeMixin, AuditUserMixin
 from .base_model import BaseModel
 from .db import db
@@ -228,6 +227,7 @@ class FormProcessMapper(AuditDateTimeMixin, AuditUserMixin, BaseModel, db.Model)
             cls.process_key,
             cls.form_id,
             cls.form_name,
+            cls.parent_form_id
         )
         limit = total_count if limit is None else limit
         query = query.paginate(page=page_number, per_page=limit, error_out=False)
@@ -299,3 +299,40 @@ class FormProcessMapper(AuditDateTimeMixin, AuditUserMixin, BaseModel, db.Model)
         if tenant_key is not None:
             tenant_auth_query = tenant_auth_query.filter(cls.tenant == tenant_key)
         return tenant_auth_query
+    
+    @classmethod
+    def find_latest_version(cls):
+        """Modifies the query to include tenant check if needed."""
+        filtered_form_query = (
+            db.session.query(
+                func.max(cls.id).label("id")  # pylint: disable=not-callable
+            )
+            .group_by(cls.parent_form_id)
+            .all()
+        )
+        filtered_form_ids = [data.id for data in filtered_form_query]
+        query =  cls.query.filter(
+            and_(FormProcessMapper.deleted.is_(False)),
+            FormProcessMapper.id.in_(filtered_form_ids),
+        )
+
+        return query.all()
+    
+    @classmethod
+    def find_with_workflow(cls,workflow):
+        print("workflow")
+        filtered_form_query = (
+            db.session.query(
+                func.max(cls.id).label("id")  # pylint: disable=not-callable
+            )
+            .group_by(cls.parent_form_id)
+            .all()
+        )
+        filtered_form_ids = [data.id for data in filtered_form_query]
+        query = cls.query.filter(
+             FormProcessMapper.id.in_(filtered_form_ids),
+            and_(FormProcessMapper.deleted.is_(False),FormProcessMapper.process_key == workflow)
+            )
+        print("form query",query.all())
+        return query.all()
+    

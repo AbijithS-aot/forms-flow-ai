@@ -1,8 +1,9 @@
 """API endpoints for managing application resource."""
 
 from http import HTTPStatus
-
+import os
 import requests
+import json
 from flask import current_app, request
 from flask_restx import Namespace, Resource, fields
 from formsflow_api_utils.exceptions import BusinessException
@@ -15,15 +16,19 @@ from formsflow_api_utils.utils import (
     profiletime,
 )
 from marshmallow.exceptions import ValidationError
-
+from formsflow_api_utils.utils import HTTP_TIMEOUT
 from formsflow_api.schemas import (
     ApplicationListReqSchema,
     ApplicationListRequestSchema,
     ApplicationSchema,
     ApplicationUpdateSchema,
 )
-from formsflow_api.services import ApplicationService
-
+import datetime
+from formsflow_api.models import Authorization
+from formsflow_api.services import (
+    ApplicationService,  
+)
+from formsflow_api.models import FormProcessMapper
 API = Namespace("Application", description="Application")
 
 application_create_model = API.model(
@@ -632,3 +637,75 @@ class ApplicationResubmitById(Resource):
             return {
                 "message": "BPM Service Unavailable",
             }, HTTPStatus.SERVICE_UNAVAILABLE
+
+@cors_preflight("GET,OPTIONS")
+@API.route("/script", methods=["GET", "OPTIONS"])
+class PythonScript(Resource):
+    """Get application status list."""
+
+    @staticmethod
+    # @auth.require
+    @profiletime
+    @API.response(200, "OK:- Successful request.", model=application_status_list_model)
+    @API.response(
+        400,
+        "BAD_REQUEST:- Invalid request.",
+    )
+    @API.response(
+        401,
+        "UNAUTHORIZED:- Authorization header not provided or an invalid token passed.",
+    )
+    def get():
+        """Method to get the application status lists."""
+        tenant_key=None
+        bpm_token_api = os.getenv("BPM_TOKEN_API")
+        bpm_client_id = os.getenv("BPM_CLIENT_ID")
+        bpm_client_secret = os.getenv("BPM_CLIENT_SECRET")
+        bpm_grant_type = os.getenv("BPM_GRANT_TYPE","client_credentials")
+        bpm_api_base = os.getenv("BPM_API_URL")
+
+        if current_app.config.get("MULTI_TENANCY_ENABLED") and tenant_key:
+            bpm_client_id = f"{tenant_key}-{bpm_client_id}"
+
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        payload = {
+            "client_id": bpm_client_id,
+            "client_secret": bpm_client_secret,
+            "grant_type": bpm_grant_type,
+        }
+        response = requests.post(
+            bpm_token_api, headers=headers, data=payload, timeout=HTTP_TIMEOUT
+        )
+        data = json.loads(response.text)
+        url = f"{bpm_api_base}/engine-rest-ext/v1/admin/form/authorization"
+        headers = {
+            "Authorization": "Bearer " + data["access_token"],
+            "Content-Type": "application/json",
+        }
+        response = requests.get(url,headers=headers)
+        data = json.loads(response.text)
+        authorization_list = data['authorizationList']
+        auth_type = 'FORM'
+        for auth in authorization_list:
+            resource_id = auth['resourceId']
+            roles = auth['groupId']
+            if resource_id == "*":
+                forms = FormProcessMapper.find_latest_version()
+            else:
+                forms = FormProcessMapper.find_with_workflow(resource_id)
+            for form in forms:
+                formId = form.parent_form_id
+                is_form_exist = Authorization.is_form_exist(formId, "FORM")
+                if is_form_exist is None:
+                    is_form_exist = Authorization(
+                        auth_type=auth_type,
+                        resource_id=form.parent_form_id,
+                        roles=[roles],
+                        created=datetime.datetime.now(),
+                        created_by=form.created_by
+                    )
+                else:
+                    if roles not in is_form_exist.roles:
+                        is_form_exist.roles = [*is_form_exist.roles, roles]
+                        is_form_exist.modified = datetime.datetime.now()
+                auth = is_form_exist.save()

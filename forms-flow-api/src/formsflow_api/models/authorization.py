@@ -112,3 +112,14 @@ class Authorization(AuditDateTimeMixin, AuditUserMixin, BaseModel, db.Model):
         if tenant:
             query = query.filter(Authorization.tenant == tenant)
         return query.one_or_none()
+    
+    @classmethod
+    def is_form_exist(cls,parent_form_id,auth_type,tenant: str = None):
+        print("authtype",auth_type)
+        query = (
+            cls.query.filter(Authorization.resource_id == str(parent_form_id))
+            .filter(Authorization.auth_type == auth_type)
+        )
+        if tenant:
+            query = query.filter(Authorization.tenant == tenant)
+        return query.one_or_none()
